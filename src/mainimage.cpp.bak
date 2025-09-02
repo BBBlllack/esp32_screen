@@ -1,0 +1,185 @@
+#include <Adafruit_GFX.h>    // Core graphics library
+#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+#include <SPI.h>
+#include <TJpg_Decoder.h>
+#include "mbedtls/base64.h"
+
+#define TFT_CS 7
+#define TFT_RST 10
+#define TFT_DC 6
+#define WIDTH 280
+#define HEIGHT 240
+
+#define TFT_MOSI 3 // Data out
+#define TFT_SCLK 2 // Clock out
+
+#define MAX_BASE64_LEN (60 * 1024) // 假设传输的图片最大 Base64 长度
+#define MAX_IMAGE_LEN (120 * 1024) // 解码后最大字节数
+
+Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
+
+String inputLine = ""; // 用来存储一条完整的数据
+
+// 缓存区：Base64 字符串 & 解码后的 JPEG
+char base64_buffer[MAX_BASE64_LEN];
+uint8_t image_buffer[MAX_IMAGE_LEN];
+
+int base64_decode(const char *input, uint8_t *output, size_t output_len);
+bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
+void ser_Recv();
+void base64_Recv();
+
+void setup()
+{
+    Serial0.begin(115200);
+    Serial1.begin(115200, SERIAL_8N1, 1, 0); // 发送到 Serial1
+    tft.init(HEIGHT, WIDTH);                 // Init ST7789 280x240
+    // tft.setSPISpeed(60000000);
+
+    tft.fillScreen(ST77XX_BLACK);
+
+    TJpgDec.setCallback(tft_output);
+    Serial0.println("Ready to receive Base64 image...");
+}
+static uint8_t flag_byte = 0;
+void loop()
+{
+    static size_t received = 0;
+    static size_t expected = 0;
+
+    // 接受1字节的标志位
+    if (expected++ == 0 && Serial1.available() >= 1)
+    {
+        flag_byte = Serial1.read(); // 读 1 字节
+        Serial0.printf("Base64: %d \n", flag_byte);
+    }
+
+    // 是base64
+    if ((flag_byte & 0b11000000) == 0b01000000)
+    {
+        base64_Recv();
+    }
+    else if ((flag_byte & 0b11000000) == 0b00000000) //传输二进制流
+    {
+        // 先接收4字节长度
+        if (expected == 0 && Serial1.available() >= 4)
+        {
+            expected = ((uint32_t)Serial1.read() << 24) |
+                       ((uint32_t)Serial1.read() << 16) |
+                       ((uint32_t)Serial1.read() << 8) |
+                       (uint32_t)Serial1.read();
+            Serial0.printf("Expecting %d bytes JPEG\n", expected);
+            received = 0;
+        }
+
+        // 接收 JPEG 数据
+        while (expected > 0 && Serial1.available() && received < expected)
+        {
+            image_buffer[received++] = Serial1.read();
+        }
+
+        // 收完后显示
+        if (expected > 0 && received == expected)
+        {
+            Serial0.printf("JPEG received: %d bytes\n", received);
+
+            // 显示
+            TJpgDec.drawJpg(0, 0, image_buffer, received);
+
+            // 重置
+            expected = 0;
+            received = 0;
+        }
+    }
+}
+
+int base64_decode(const char *input, uint8_t *output, size_t output_len)
+{
+    size_t out_len = 0;
+    int ret = mbedtls_base64_decode(output, output_len, &out_len, (const unsigned char *)input, strlen(input));
+    if (ret == 0)
+    {
+        return out_len; // 返回解码后的字节数
+    }
+    else
+    {
+        return -1; // 出错
+    }
+}
+
+bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap)
+{
+    tft.drawRGBBitmap(x, y, bitmap, w, h);
+    return true;
+}
+
+void ser_Recv()
+{
+    // 逐字节接收
+    while (Serial1.available() > 0)
+    {
+        char c = Serial1.read();
+        Serial0.print(c);
+        if (c == '\n')
+        {
+            // 收到一整行，显示到屏幕
+            tft.fillScreen(ST77XX_BLACK);
+            tft.setCursor(5, 10);
+            tft.print(inputLine);
+
+            // 清空缓存，准备下一条
+            inputLine = "";
+        }
+        else if (c != '\r')
+        {
+            // 忽略回车，只存储有效字符
+            inputLine += c;
+        }
+    }
+}
+
+void base64_Recv()
+{
+    static size_t len = 0;
+
+    // 从串口读 Base64 数据（直到遇到换行 \n）
+    // 刷新屏幕
+
+    while (Serial1.available())
+    {
+        char c = Serial1.read();
+        if (c == '\n')
+        {
+
+            base64_buffer[len] = '\0'; // 结尾
+            Serial0.println("Base64 received, decoding...");
+
+            // 解码
+            size_t out_len = 0;
+            if (mbedtls_base64_decode(image_buffer, MAX_IMAGE_LEN, &out_len,
+                                      (const unsigned char *)base64_buffer, strlen(base64_buffer)) == 0)
+            {
+                Serial0.printf("Decoded JPEG size: %d bytes\n", out_len);
+
+                // 用 TJpg_Decoder 显示图像
+                // tft.fillScreen(ST77XX_BLACK);
+                // delay(1000);
+                TJpgDec.drawJpg(0, 0, image_buffer, out_len);
+            }
+            else
+            {
+                Serial0.println("Base64 decode failed!");
+            }
+
+            len = 0; // 重置缓冲
+        }
+        else
+        {
+            if (len < MAX_BASE64_LEN - 1)
+            {
+                base64_buffer[len++] = c;
+            }
+        }
+    }
+
+}

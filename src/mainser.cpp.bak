@@ -1,0 +1,139 @@
+
+// #include <lvgl.h>
+
+#include <Adafruit_GFX.h>    // Core graphics library
+#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+#include <SPI.h>
+#include <TJpg_Decoder.h>
+
+
+
+
+#define TFT_CS        13
+#define TFT_RST        9
+#define TFT_DC         8
+#define WIDTH 280
+#define HEIGHT 240
+
+#define TFT_MOSI 6  // Data out
+#define TFT_SCLK 10  // Clock out
+
+// ================== 串口接收缓冲 ==================
+#define MAX_IMG_SIZE 100000  // 根据实际图像大小调整
+uint8_t imgBuffer[MAX_IMG_SIZE];
+uint32_t imgLen = 0;
+uint32_t received = 0;
+
+Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
+
+
+bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
+    tft.setAddrWindow(x, y, x + w - 1, y + h - 1);
+    tft.writePixels(bitmap, w * h);  // 替代 pushColors
+    return true;
+}
+
+void setup(void) {
+  Serial0.begin(115200);
+  Serial1.begin(115200, SERIAL_8N1, 1, 0);       // 发送到 Serial1
+  Serial0.print(F("Hello! ST7789 TFT Test"));
+  tft.init(HEIGHT, WIDTH);
+  tft.setRotation(0);
+  tft.fillScreen(ST77XX_BLACK);
+
+  // TJpg_Decoder 回调
+  TJpgDec.setJpgScale(1);        // 1:1比例
+  TJpgDec.setCallback(tft_output);
+}
+
+// ================== loop ==================
+void loop() {
+  // 等待接收图像长度 (4字节)
+  if (Serial1.available() >= 4 && imgLen == 0) {
+    uint8_t lenBytes[4];
+    Serial1.readBytes(lenBytes, 4);
+    imgLen = (lenBytes[0] << 24) | (lenBytes[1] << 16) | (lenBytes[2] << 8) | lenBytes[3];
+    received = 0;
+    if (imgLen > MAX_IMG_SIZE) imgLen = MAX_IMG_SIZE;
+    Serial0.println(String("Expecting ") + imgLen + " bytes");
+  }
+
+  // 接收图像数据
+  if (imgLen > 0) {
+    while (Serial1.available() && received < imgLen) {
+      imgBuffer[received++] = Serial1.read();
+    }
+
+    // 当接收完成，显示图像
+    if (received >= imgLen) {
+      Serial0.println("JPEG received, decoding...");
+      TJpgDec.drawJpg(0, 0, imgBuffer, imgLen); // 显示在 (0,0)
+      imgLen = 0;    // 重置
+      received = 0;
+    }
+  }
+}
+
+/**
+
+#include <Adafruit_GFX.h>    // Core graphics library
+#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+#include <SPI.h>
+#include <TJpg_Decoder.h>
+
+#define TFT_CS 13
+#define TFT_RST 9
+#define TFT_DC 8
+#define WIDTH 280
+#define HEIGHT 240
+
+#define TFT_MOSI 6  // Data out
+#define TFT_SCLK 10 // Clock out
+
+Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
+
+void testdrawtext(char *text, uint16_t color)
+{
+    tft.fillScreen(ST77XX_BLACK); // 清屏
+    tft.setCursor(0, 5);
+    tft.setTextColor(color);
+    tft.setTextWrap(true);
+    tft.print(text);
+}
+
+void setup()
+{
+    Serial0.begin(115200);
+    Serial1.begin(115200, SERIAL_8N1, 1, 0); // 发送到 Serial1
+    tft.init(HEIGHT, WIDTH);                 // Init ST7789 280x240
+    tft.fillScreen(ST77XX_BLACK);
+}
+
+String inputLine = ""; // 用来存储一条完整的数据
+
+void loop()
+{
+    // 逐字节接收
+    while (Serial1.available() > 0)
+    {
+        char c = Serial1.read();
+        Serial0.print(c);
+        if (c == '\n')
+        {
+            // 收到一整行，显示到屏幕
+            tft.fillScreen(ST77XX_BLACK);
+            tft.setCursor(5, 10);
+            tft.print(inputLine);
+
+            // 清空缓存，准备下一条
+            inputLine = "";
+        }
+        else if (c != '\r')
+        {
+            // 忽略回车，只存储有效字符
+            inputLine += c;
+        }
+    }
+}
+
+*/

@@ -1,0 +1,26 @@
+{
+    "files.associations": {
+        "lv_init.h": "c",
+        "lv_conf_internal.h": "c",
+        "*.bak": "cpp",
+        "bitset": "cpp",
+        "list": "cpp",
+        "unordered_map": "cpp",
+        "unordered_set": "cpp",
+        "memory_resource": "cpp",
+        "algorithm": "cpp",
+        "functional": "cpp",
+        "memory": "cpp",
+        "random": "cpp",
+        "fstream": "cpp",
+        "initializer_list": "cpp",
+        "istream": "cpp",
+        "streambuf": "cpp",
+        "cmath": "cpp",
+        "regex": "cpp",
+        "tuple": "cpp",
+        "utility": "cpp",
+        "type_traits": "cpp",
+        "typeinfo": "cpp"
+    }
+}
